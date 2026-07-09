@@ -1,38 +1,92 @@
-import fs from 'fs';
-import path from 'path';
-const dataDir = path.join(__dirname, '../../data');
-const choicesDbPath = path.join(dataDir, 'choices.json');
-const hangzhouDbPath = path.join(dataDir, 'hangzhou.json');
-let choices = [];
-let hangzhouRecords = [];
-let nextChoiceId = 1;
-let nextHangzhouId = 1;
-function loadData() {
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const REPO_OWNER = 'ZhangChenfei123';
+const REPO_NAME = 'lgt';
+const CHOICES_PATH = 'data/choices.json';
+const HANGZHOU_PATH = 'data/hangzhou.json';
+async function fetchGitHubFile(path) {
+    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
+    try {
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `token ${GITHUB_TOKEN}`,
+                'Accept': 'application/vnd.github.v3+json',
+            },
+        });
+        if (response.status === 404) {
+            return { content: '[]', sha: null };
+        }
+        const data = await response.json();
+        if (data.content) {
+            const decoded = Buffer.from(data.content, 'base64').toString('utf-8');
+            return { content: decoded, sha: data.sha };
+        }
+        return { content: '[]', sha: null };
     }
-    if (fs.existsSync(choicesDbPath)) {
-        try {
-            const content = fs.readFileSync(choicesDbPath, 'utf-8');
-            choices = JSON.parse(content);
-            nextChoiceId = choices.length > 0 ? Math.max(...choices.map(c => c.id)) + 1 : 1;
-        }
-        catch {
-            choices = [];
-        }
-    }
-    if (fs.existsSync(hangzhouDbPath)) {
-        try {
-            const content = fs.readFileSync(hangzhouDbPath, 'utf-8');
-            hangzhouRecords = JSON.parse(content);
-            nextHangzhouId = hangzhouRecords.length > 0 ? Math.max(...hangzhouRecords.map(r => r.id)) + 1 : 1;
-        }
-        catch {
-            hangzhouRecords = [];
-        }
+    catch (error) {
+        console.error('Failed to fetch from GitHub:', error);
+        return { content: '[]', sha: null };
     }
 }
-loadData();
+async function writeGitHubFile(path, content, sha) {
+    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
+    const encodedContent = Buffer.from(content, 'utf-8').toString('base64');
+    const body = sha
+        ? {
+            message: `Update ${path}`,
+            content: encodedContent,
+            sha: sha,
+        }
+        : {
+            message: `Create ${path}`,
+            content: encodedContent,
+        };
+    try {
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${GITHUB_TOKEN}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+        return response.ok;
+    }
+    catch (error) {
+        console.error('Failed to write to GitHub:', error);
+        return false;
+    }
+}
+async function getChoices() {
+    const result = await fetchGitHubFile(CHOICES_PATH);
+    try {
+        return JSON.parse(result.content);
+    }
+    catch {
+        return [];
+    }
+}
+async function saveChoice(choice) {
+    const result = await fetchGitHubFile(CHOICES_PATH);
+    const choices = JSON.parse(result.content) || [];
+    choices.push(choice);
+    return writeGitHubFile(CHOICES_PATH, JSON.stringify(choices, null, 2), result.sha);
+}
+async function getHangzhouRecords() {
+    const result = await fetchGitHubFile(HANGZHOU_PATH);
+    try {
+        return JSON.parse(result.content);
+    }
+    catch {
+        return [];
+    }
+}
+async function saveHangzhouRecord(record) {
+    const result = await fetchGitHubFile(HANGZHOU_PATH);
+    const records = JSON.parse(result.content) || [];
+    records.push(record);
+    return writeGitHubFile(HANGZHOU_PATH, JSON.stringify(records, null, 2), result.sha);
+}
 function jsonResponse(data, statusCode = 200) {
     return {
         statusCode,
@@ -57,17 +111,19 @@ const handler = async (event) => {
         if (!choice || !['A', 'B', 'C', 'D'].includes(choice)) {
             return jsonResponse({ success: false, error: 'Invalid choice' }, 400);
         }
+        const choices = await getChoices();
+        const nextId = choices.length > 0 ? Math.max(...choices.map(c => c.id)) + 1 : 1;
         const newChoice = {
-            id: nextChoiceId++,
+            id: nextId,
             choice: choice,
             createdAt: new Date().toISOString(),
             ip: ip,
         };
-        choices.push(newChoice);
-        fs.writeFileSync(choicesDbPath, JSON.stringify(choices, null, 2));
-        return jsonResponse({ success: true });
+        const success = await saveChoice(newChoice);
+        return jsonResponse({ success });
     }
     if (path === '/api/choices' && httpMethod === 'GET') {
+        const choices = await getChoices();
         return jsonResponse({ success: true, choices: [...choices].reverse() });
     }
     if (path === '/api/hangzhou' && httpMethod === 'POST') {
@@ -75,18 +131,20 @@ const handler = async (event) => {
         if (!content || content.trim().length === 0) {
             return jsonResponse({ success: false, error: 'Content is required' }, 400);
         }
+        const records = await getHangzhouRecords();
+        const nextId = records.length > 0 ? Math.max(...records.map(r => r.id)) + 1 : 1;
         const newRecord = {
-            id: nextHangzhouId++,
+            id: nextId,
             content: content.trim(),
             createdAt: new Date().toISOString(),
             ip: ip,
         };
-        hangzhouRecords.push(newRecord);
-        fs.writeFileSync(hangzhouDbPath, JSON.stringify(hangzhouRecords, null, 2));
-        return jsonResponse({ success: true });
+        const success = await saveHangzhouRecord(newRecord);
+        return jsonResponse({ success });
     }
     if (path === '/api/hangzhou' && httpMethod === 'GET') {
-        return jsonResponse({ success: true, records: [...hangzhouRecords].reverse() });
+        const records = await getHangzhouRecords();
+        return jsonResponse({ success: true, records: [...records].reverse() });
     }
     if (path === '/api/health' && httpMethod === 'GET') {
         return jsonResponse({ success: true, message: 'ok' });
