@@ -19,21 +19,22 @@ interface DataStore {
   hangzhou: HangzhouRecord[]
 }
 
-const DATA_KEY = 'lgt_choices_data_v2'
+interface KVNamespace {
+  get(key: string): Promise<string | null>
+  set(key: string, value: string): Promise<void>
+}
+
+declare const LGT_CHOICES: KVNamespace
+
+const DATA_KEY = 'lgt_data_store'
 
 async function getData(): Promise<DataStore> {
   try {
-    const response = await fetch(`https://api.jsonstorage.net/v1/json/${DATA_KEY}`, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
-    if (response.ok) {
-      const data = await response.json()
-      return { choices: data.choices || [], hangzhou: data.hangzhou || [] }
-    } else {
-      return { choices: [], hangzhou: [] }
+    const dataStr = await LGT_CHOICES.get(DATA_KEY)
+    if (dataStr) {
+      return JSON.parse(dataStr)
     }
+    return { choices: [], hangzhou: [] }
   } catch {
     return { choices: [], hangzhou: [] }
   }
@@ -41,14 +42,8 @@ async function getData(): Promise<DataStore> {
 
 async function saveData(data: DataStore): Promise<boolean> {
   try {
-    const response = await fetch(`https://api.jsonstorage.net/v1/json/${DATA_KEY}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    })
-    return response.ok
+    await LGT_CHOICES.set(DATA_KEY, JSON.stringify(data))
+    return true
   } catch {
     return false
   }

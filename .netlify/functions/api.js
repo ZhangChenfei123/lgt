@@ -1,18 +1,11 @@
-const DATA_KEY = 'lgt_choices_data_v2';
+const DATA_KEY = 'lgt_data_store';
 async function getData() {
     try {
-        const response = await fetch(`https://api.jsonstorage.net/v1/json/${DATA_KEY}`, {
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-        if (response.ok) {
-            const data = await response.json();
-            return { choices: data.choices || [], hangzhou: data.hangzhou || [] };
+        const dataStr = await LGT_CHOICES.get(DATA_KEY);
+        if (dataStr) {
+            return JSON.parse(dataStr);
         }
-        else {
-            return { choices: [], hangzhou: [] };
-        }
+        return { choices: [], hangzhou: [] };
     }
     catch {
         return { choices: [], hangzhou: [] };
@@ -20,14 +13,8 @@ async function getData() {
 }
 async function saveData(data) {
     try {
-        const response = await fetch(`https://api.jsonstorage.net/v1/json/${DATA_KEY}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data),
-        });
-        return response.ok;
+        await LGT_CHOICES.set(DATA_KEY, JSON.stringify(data));
+        return true;
     }
     catch {
         return false;

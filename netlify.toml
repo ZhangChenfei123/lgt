@@ -12,3 +12,10 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[edge_functions]]
+  function = "api"
+  path = "/api/*"
+
+[functions]
+  api = { kv_namespaces = ["LGT_CHOICES"] }
