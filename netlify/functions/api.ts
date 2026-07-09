@@ -42,9 +42,14 @@ async function getData(): Promise<DataStore> {
 
 async function saveData(data: DataStore): Promise<boolean> {
   try {
+    if (!LGT_CHOICES) {
+      console.error('LGT_CHOICES KV namespace is not available')
+      return false
+    }
     await LGT_CHOICES.set(DATA_KEY, JSON.stringify(data))
     return true
-  } catch {
+  } catch (error: any) {
+    console.error('Failed to save data:', error.message || error)
     return false
   }
 }

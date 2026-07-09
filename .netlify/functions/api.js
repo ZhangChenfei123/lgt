@@ -13,10 +13,15 @@ async function getData() {
 }
 async function saveData(data) {
     try {
+        if (!LGT_CHOICES) {
+            console.error('LGT_CHOICES KV namespace is not available');
+            return false;
+        }
         await LGT_CHOICES.set(DATA_KEY, JSON.stringify(data));
         return true;
     }
-    catch {
+    catch (error) {
+        console.error('Failed to save data:', error.message || error);
         return false;
     }
 }
