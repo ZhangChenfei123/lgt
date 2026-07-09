@@ -47,6 +47,17 @@ async function saveData(data: DataStore): Promise<{ success: boolean; error?: st
     if (!process.env.GITHUB_TOKEN) {
       return { success: false, error: 'GITHUB_TOKEN not set' }
     }
+    
+    const token = process.env.GITHUB_TOKEN
+    for (let i = 0; i < token.length; i++) {
+      if (token.charCodeAt(i) > 127) {
+        return { success: false, error: `GITHUB_TOKEN包含非ASCII字符，位置${i}: "${token[i]}" (charCode: ${token.charCodeAt(i)})` }
+      }
+    }
+    
+    if (token.length < 30) {
+      return { success: false, error: `GITHUB_TOKEN太短（${token.length}字符），请检查是否正确` }
+    }
 
     const existingResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`)
     let sha = ''
