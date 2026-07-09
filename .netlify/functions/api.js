@@ -23,11 +23,18 @@ async function getData() {
 }
 async function saveData(data) {
     try {
+        if (!process.env.GITHUB_TOKEN) {
+            return { success: false, error: 'GITHUB_TOKEN not set' };
+        }
         const existingResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`);
         let sha = '';
         if (existingResponse.ok) {
             const existingData = await existingResponse.json();
             sha = existingData.sha;
+        }
+        else if (existingResponse.status !== 404) {
+            const errorData = await existingResponse.json();
+            return { success: false, error: `Failed to get existing file: ${errorData.message || existingResponse.status}` };
         }
         const content = Buffer.from(JSON.stringify(data, null, 2)).toString('base64');
         const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`, {
@@ -42,10 +49,16 @@ async function saveData(data) {
                 sha,
             }),
         });
-        return response.ok;
+        if (response.ok) {
+            return { success: true };
+        }
+        else {
+            const errorData = await response.json();
+            return { success: false, error: errorData.message || `HTTP ${response.status}` };
+        }
     }
-    catch {
-        return false;
+    catch (error) {
+        return { success: false, error: error.message || 'Unknown error' };
     }
 }
 function jsonResponse(data, statusCode = 200) {
@@ -91,12 +104,12 @@ const handler = async (event) => {
                 ip,
             };
             data.choices.unshift(newChoice);
-            const success = await saveData(data);
-            if (success) {
+            const saveResult = await saveData(data);
+            if (saveResult.success) {
                 return jsonResponse({ success: true, choice: newChoice });
             }
             else {
-                return jsonResponse({ success: false, error: 'Failed to save choice' }, 500);
+                return jsonResponse({ success: false, error: 'Failed to save choice', details: saveResult.error }, 500);
             }
         }
         catch (error) {
@@ -128,12 +141,12 @@ const handler = async (event) => {
                 ip,
             };
             data.hangzhou.unshift(newRecord);
-            const success = await saveData(data);
-            if (success) {
+            const saveResult = await saveData(data);
+            if (saveResult.success) {
                 return jsonResponse({ success: true, record: newRecord });
             }
             else {
-                return jsonResponse({ success: false, error: 'Failed to save record' }, 500);
+                return jsonResponse({ success: false, error: 'Failed to save record', details: saveResult.error }, 500);
             }
         }
         catch (error) {
