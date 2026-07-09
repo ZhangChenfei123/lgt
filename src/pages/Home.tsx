@@ -78,6 +78,15 @@ export default function Home() {
         <div className="mt-8 text-center">
           <p className="text-xs text-gray-400">点击选项后结果将被记录~</p>
         </div>
+        
+        <div className="mt-4 text-center">
+          <button
+            onClick={() => navigate('/admin')}
+            className="text-xs text-gray-400 hover:text-gray-600 underline transition-colors"
+          >
+            🔒 管理员查看记录
+          </button>
+        </div>
       </div>
     </div>
   )
