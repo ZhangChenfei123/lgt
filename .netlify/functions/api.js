@@ -1,19 +1,9 @@
-const GITHUB_REPO = 'ZhangChenfei123/lgt';
-const DATA_FILE_PATH = 'data/choices.json';
+const DATA_KEY = 'lgt_data_store';
 async function getData() {
     try {
-        const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`);
-        if (response.ok) {
-            const data = await response.json();
-            const content = Buffer.from(data.content, 'base64').toString('utf-8');
-            const parsed = JSON.parse(content);
-            if (Array.isArray(parsed)) {
-                return { choices: parsed, hangzhou: [] };
-            }
-            return { choices: parsed.choices || [], hangzhou: parsed.hangzhou || [] };
-        }
-        else if (response.status === 404) {
-            return { choices: [], hangzhou: [] };
+        const dataStr = await LGT_CHOICES.get(DATA_KEY);
+        if (dataStr) {
+            return JSON.parse(dataStr);
         }
         return { choices: [], hangzhou: [] };
     }
@@ -23,26 +13,8 @@ async function getData() {
 }
 async function saveData(data) {
     try {
-        const existingResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`);
-        let sha = '';
-        if (existingResponse.ok) {
-            const existingData = await existingResponse.json();
-            sha = existingData.sha;
-        }
-        const content = Buffer.from(JSON.stringify(data, null, 2)).toString('base64');
-        const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `token ${process.env.GITHUB_TOKEN}`,
-            },
-            body: JSON.stringify({
-                message: 'Update choices data',
-                content,
-                sha,
-            }),
-        });
-        return response.ok;
+        await LGT_CHOICES.set(DATA_KEY, JSON.stringify(data));
+        return true;
     }
     catch {
         return false;
