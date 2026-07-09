@@ -59,7 +59,7 @@ async function saveData(data: DataStore): Promise<{ success: boolean; error?: st
       return { success: false, error: `Failed to get existing file: ${errorData.message || existingResponse.status}` }
     }
 
-    const content = Buffer.from(JSON.stringify(data, null, 2)).toString('base64')
+    const content = Buffer.from(JSON.stringify(data, null, 2), 'utf8').toString('base64')
     
     const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`, {
       method: 'PUT',
