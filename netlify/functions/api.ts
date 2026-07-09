@@ -36,7 +36,7 @@ async function createPool(): Promise<Pool> {
         database: 'postgres',
         user: `postgres.${PROJECT_ID}`,
         password: PASSWORD,
-        ssl: { rejectUnauthorized: true },
+        ssl: { rejectUnauthorized: false },
         connectionTimeoutMillis: 5000,
       }
       const testPool = new Pool(config)
