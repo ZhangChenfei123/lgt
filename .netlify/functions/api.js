@@ -1,92 +1,35 @@
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const REPO_OWNER = 'ZhangChenfei123';
-const REPO_NAME = 'lgt';
-const CHOICES_PATH = 'data/choices.json';
-const HANGZHOU_PATH = 'data/hangzhou.json';
-async function fetchGitHubFile(path) {
-    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
+import { Pool } from 'pg';
+const pool = new Pool({
+    host: 'db.tlwjwaselavdokiqvuew.supabase.co',
+    port: 5432,
+    database: 'postgres',
+    user: 'postgres',
+    password: 'Zgl@1812342754',
+});
+async function initTables() {
     try {
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': `token ${GITHUB_TOKEN}`,
-                'Accept': 'application/vnd.github.v3+json',
-            },
-        });
-        if (response.status === 404) {
-            return { content: '[]', sha: null };
-        }
-        const data = await response.json();
-        if (data.content) {
-            const decoded = Buffer.from(data.content, 'base64').toString('utf-8');
-            return { content: decoded, sha: data.sha };
-        }
-        return { content: '[]', sha: null };
+        await pool.query(`
+      CREATE TABLE IF NOT EXISTS choices (
+        id SERIAL PRIMARY KEY,
+        choice VARCHAR(1) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        ip VARCHAR(50)
+      )
+    `);
+        await pool.query(`
+      CREATE TABLE IF NOT EXISTS hangzhou (
+        id SERIAL PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        ip VARCHAR(50)
+      )
+    `);
     }
     catch (error) {
-        console.error('Failed to fetch from GitHub:', error);
-        return { content: '[]', sha: null };
+        console.error('Failed to init tables:', error);
     }
 }
-async function writeGitHubFile(path, content, sha) {
-    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
-    const encodedContent = Buffer.from(content, 'utf-8').toString('base64');
-    const body = sha
-        ? {
-            message: `Update ${path}`,
-            content: encodedContent,
-            sha: sha,
-        }
-        : {
-            message: `Create ${path}`,
-            content: encodedContent,
-        };
-    try {
-        const response = await fetch(url, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `token ${GITHUB_TOKEN}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body),
-        });
-        return response.ok;
-    }
-    catch (error) {
-        console.error('Failed to write to GitHub:', error);
-        return false;
-    }
-}
-async function getChoices() {
-    const result = await fetchGitHubFile(CHOICES_PATH);
-    try {
-        return JSON.parse(result.content);
-    }
-    catch {
-        return [];
-    }
-}
-async function saveChoice(choice) {
-    const result = await fetchGitHubFile(CHOICES_PATH);
-    const choices = JSON.parse(result.content) || [];
-    choices.push(choice);
-    return writeGitHubFile(CHOICES_PATH, JSON.stringify(choices, null, 2), result.sha);
-}
-async function getHangzhouRecords() {
-    const result = await fetchGitHubFile(HANGZHOU_PATH);
-    try {
-        return JSON.parse(result.content);
-    }
-    catch {
-        return [];
-    }
-}
-async function saveHangzhouRecord(record) {
-    const result = await fetchGitHubFile(HANGZHOU_PATH);
-    const records = JSON.parse(result.content) || [];
-    records.push(record);
-    return writeGitHubFile(HANGZHOU_PATH, JSON.stringify(records, null, 2), result.sha);
-}
+initTables();
 function jsonResponse(data, statusCode = 200) {
     return {
         statusCode,
@@ -111,40 +54,48 @@ const handler = async (event) => {
         if (!choice || !['A', 'B', 'C', 'D'].includes(choice)) {
             return jsonResponse({ success: false, error: 'Invalid choice' }, 400);
         }
-        const choices = await getChoices();
-        const nextId = choices.length > 0 ? Math.max(...choices.map(c => c.id)) + 1 : 1;
-        const newChoice = {
-            id: nextId,
-            choice: choice,
-            createdAt: new Date().toISOString(),
-            ip: ip,
-        };
-        const success = await saveChoice(newChoice);
-        return jsonResponse({ success });
+        try {
+            await pool.query('INSERT INTO choices (choice, ip) VALUES ($1, $2)', [choice, ip]);
+            return jsonResponse({ success: true });
+        }
+        catch (error) {
+            console.error('Failed to save choice:', error);
+            return jsonResponse({ success: false, error: 'Failed to save choice' }, 500);
+        }
     }
     if (path === '/api/choices' && httpMethod === 'GET') {
-        const choices = await getChoices();
-        return jsonResponse({ success: true, choices: [...choices].reverse() });
+        try {
+            const result = await pool.query('SELECT * FROM choices ORDER BY created_at DESC');
+            return jsonResponse({ success: true, choices: result.rows });
+        }
+        catch (error) {
+            console.error('Failed to get choices:', error);
+            return jsonResponse({ success: false, error: 'Failed to get choices' }, 500);
+        }
     }
     if (path === '/api/hangzhou' && httpMethod === 'POST') {
         const { content } = body;
         if (!content || content.trim().length === 0) {
             return jsonResponse({ success: false, error: 'Content is required' }, 400);
         }
-        const records = await getHangzhouRecords();
-        const nextId = records.length > 0 ? Math.max(...records.map(r => r.id)) + 1 : 1;
-        const newRecord = {
-            id: nextId,
-            content: content.trim(),
-            createdAt: new Date().toISOString(),
-            ip: ip,
-        };
-        const success = await saveHangzhouRecord(newRecord);
-        return jsonResponse({ success });
+        try {
+            await pool.query('INSERT INTO hangzhou (content, ip) VALUES ($1, $2)', [content.trim(), ip]);
+            return jsonResponse({ success: true });
+        }
+        catch (error) {
+            console.error('Failed to save hangzhou record:', error);
+            return jsonResponse({ success: false, error: 'Failed to save record' }, 500);
+        }
     }
     if (path === '/api/hangzhou' && httpMethod === 'GET') {
-        const records = await getHangzhouRecords();
-        return jsonResponse({ success: true, records: [...records].reverse() });
+        try {
+            const result = await pool.query('SELECT * FROM hangzhou ORDER BY created_at DESC');
+            return jsonResponse({ success: true, records: result.rows });
+        }
+        catch (error) {
+            console.error('Failed to get hangzhou records:', error);
+            return jsonResponse({ success: false, error: 'Failed to get records' }, 500);
+        }
     }
     if (path === '/api/health' && httpMethod === 'GET') {
         return jsonResponse({ success: true, message: 'ok' });
