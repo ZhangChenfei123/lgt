@@ -6,6 +6,7 @@
   "scripts": {
     "client:dev": "vite",
     "build": "npm install && tsc -b && vite build",
+    "build:functions": "tsc --project tsconfig.functions.json",
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc --noEmit",
