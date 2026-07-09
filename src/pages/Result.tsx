@@ -33,6 +33,10 @@ export default function Result() {
     navigate('/')
   }
 
+  const handleNextQuestion = () => {
+    navigate('/hangzhou')
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-100 via-orange-50 to-yellow-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center transform hover:scale-[1.02] transition-transform duration-300">
@@ -49,8 +53,15 @@ export default function Result() {
         </p>
         
         <button
+          onClick={handleNextQuestion}
+          className="w-full py-4 px-6 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-xl text-lg font-medium hover:from-green-600 hover:to-teal-600 transition-all duration-200 shadow-lg hover:shadow-xl mb-4"
+        >
+          📝 下一题
+        </button>
+        
+        <button
           onClick={handleBack}
-          className="w-full py-4 px-6 bg-red-500 text-white rounded-xl text-lg font-medium hover:bg-red-600 transition-all duration-200 shadow-lg hover:shadow-xl"
+          className="w-full py-4 px-6 bg-gray-200 text-gray-700 rounded-xl text-lg font-medium hover:bg-gray-300 transition-all duration-200"
         >
           返回重新选择
         </button>
