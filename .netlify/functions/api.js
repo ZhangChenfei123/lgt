@@ -1,75 +1,63 @@
-const GITHUB_REPO = 'ZhangChenfei123/lgt';
-const DATA_FILE_PATH = 'data/choices.json';
-async function getData() {
-    try {
-        const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`);
-        if (response.ok) {
-            const data = await response.json();
-            const content = Buffer.from(data.content, 'base64').toString('utf-8');
-            const parsed = JSON.parse(content);
-            if (Array.isArray(parsed)) {
-                return { choices: parsed, hangzhou: [] };
-            }
-            return { choices: parsed.choices || [], hangzhou: parsed.hangzhou || [] };
+import { Pool } from 'pg';
+const PROJECT_ID = 'tlwjwaselavdokiqvuew';
+const PASSWORD = 'Zgl@1812342754';
+const regions = ['ap-northeast-1', 'ap-southeast-1', 'us-east-1', 'eu-west-1', 'ap-south-1'];
+let pool = null;
+async function createPool() {
+    for (const region of regions) {
+        try {
+            const config = {
+                host: `aws-0-${region}.pooler.supabase.com`,
+                port: 5432,
+                database: 'postgres',
+                user: `postgres.${PROJECT_ID}`,
+                password: PASSWORD,
+                ssl: { rejectUnauthorized: true },
+                connectionTimeoutMillis: 5000,
+            };
+            const testPool = new Pool(config);
+            await testPool.query('SELECT 1');
+            pool = testPool;
+            console.log(`Connected to region: ${region}`);
+            return pool;
         }
-        else if (response.status === 404) {
-            return { choices: [], hangzhou: [] };
+        catch {
+            console.log(`Failed to connect to region: ${region}`);
         }
-        return { choices: [], hangzhou: [] };
     }
-    catch {
-        return { choices: [], hangzhou: [] };
-    }
+    throw new Error('Failed to connect to any region');
 }
-async function saveData(data) {
+async function getPool() {
+    if (!pool) {
+        pool = await createPool();
+    }
+    return pool;
+}
+async function initTables() {
     try {
-        if (!process.env.GITHUB_TOKEN) {
-            return { success: false, error: 'GITHUB_TOKEN not set' };
-        }
-        const token = process.env.GITHUB_TOKEN;
-        for (let i = 0; i < token.length; i++) {
-            if (token.charCodeAt(i) > 127) {
-                return { success: false, error: `GITHUB_TOKEN包含非ASCII字符，位置${i}: "${token[i]}" (charCode: ${token.charCodeAt(i)})` };
-            }
-        }
-        if (token.length < 30) {
-            return { success: false, error: `GITHUB_TOKEN太短（${token.length}字符），请检查是否正确` };
-        }
-        const existingResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`);
-        let sha = '';
-        if (existingResponse.ok) {
-            const existingData = await existingResponse.json();
-            sha = existingData.sha;
-        }
-        else if (existingResponse.status !== 404) {
-            const errorData = await existingResponse.json();
-            return { success: false, error: `Failed to get existing file: ${errorData.message || existingResponse.status}` };
-        }
-        const content = Buffer.from(JSON.stringify(data, null, 2), 'utf8').toString('base64');
-        const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `token ${process.env.GITHUB_TOKEN}`,
-            },
-            body: JSON.stringify({
-                message: 'Update choices data',
-                content,
-                sha,
-            }),
-        });
-        if (response.ok) {
-            return { success: true };
-        }
-        else {
-            const errorData = await response.json();
-            return { success: false, error: errorData.message || `HTTP ${response.status}` };
-        }
+        const pool = await getPool();
+        await pool.query(`
+      CREATE TABLE IF NOT EXISTS choices (
+        id SERIAL PRIMARY KEY,
+        choice VARCHAR(1) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        ip VARCHAR(50)
+      )
+    `);
+        await pool.query(`
+      CREATE TABLE IF NOT EXISTS hangzhou (
+        id SERIAL PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        ip VARCHAR(50)
+      )
+    `);
     }
     catch (error) {
-        return { success: false, error: error.message || 'Unknown error' };
+        console.error('Failed to init tables:', error);
     }
 }
+initTables();
 function jsonResponse(data, statusCode = 200) {
     return {
         statusCode,
@@ -105,34 +93,25 @@ const handler = async (event) => {
             return jsonResponse({ success: false, error: 'Invalid choice' }, 400);
         }
         try {
-            const data = await getData();
-            const newChoice = {
-                id: Date.now(),
-                choice: choice,
-                created_at: new Date().toISOString(),
-                ip,
-            };
-            data.choices.unshift(newChoice);
-            const saveResult = await saveData(data);
-            if (saveResult.success) {
-                return jsonResponse({ success: true, choice: newChoice });
-            }
-            else {
-                return jsonResponse({ success: false, error: 'Failed to save choice', details: saveResult.error }, 500);
-            }
+            const pool = await getPool();
+            const result = await pool.query('INSERT INTO choices (choice, ip) VALUES ($1, $2)', [choice, ip]);
+            return jsonResponse({ success: true, rowCount: result.rowCount });
         }
         catch (error) {
             console.error('Failed to save choice:', error);
+            pool = null;
             return jsonResponse({ success: false, error: 'Failed to save choice', details: error.message }, 500);
         }
     }
     if (pathMatch('/api/choices') && httpMethod === 'GET') {
         try {
-            const data = await getData();
-            return jsonResponse({ success: true, choices: data.choices });
+            const pool = await getPool();
+            const result = await pool.query('SELECT * FROM choices ORDER BY created_at DESC');
+            return jsonResponse({ success: true, choices: result.rows });
         }
         catch (error) {
             console.error('Failed to get choices:', error);
+            pool = null;
             return jsonResponse({ success: false, error: 'Failed to get choices', details: error.message }, 500);
         }
     }
@@ -142,34 +121,25 @@ const handler = async (event) => {
             return jsonResponse({ success: false, error: 'Content is required' }, 400);
         }
         try {
-            const data = await getData();
-            const newRecord = {
-                id: Date.now(),
-                content: content.trim(),
-                created_at: new Date().toISOString(),
-                ip,
-            };
-            data.hangzhou.unshift(newRecord);
-            const saveResult = await saveData(data);
-            if (saveResult.success) {
-                return jsonResponse({ success: true, record: newRecord });
-            }
-            else {
-                return jsonResponse({ success: false, error: 'Failed to save record', details: saveResult.error }, 500);
-            }
+            const pool = await getPool();
+            const result = await pool.query('INSERT INTO hangzhou (content, ip) VALUES ($1, $2)', [content.trim(), ip]);
+            return jsonResponse({ success: true, rowCount: result.rowCount });
         }
         catch (error) {
             console.error('Failed to save hangzhou record:', error);
+            pool = null;
             return jsonResponse({ success: false, error: 'Failed to save record', details: error.message }, 500);
         }
     }
     if (pathMatch('/api/hangzhou') && httpMethod === 'GET') {
         try {
-            const data = await getData();
-            return jsonResponse({ success: true, records: data.hangzhou });
+            const pool = await getPool();
+            const result = await pool.query('SELECT * FROM hangzhou ORDER BY created_at DESC');
+            return jsonResponse({ success: true, records: result.rows });
         }
         catch (error) {
             console.error('Failed to get hangzhou records:', error);
+            pool = null;
             return jsonResponse({ success: false, error: 'Failed to get records', details: error.message }, 500);
         }
     }

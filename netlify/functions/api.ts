@@ -1,4 +1,5 @@
 import { Handler } from '@netlify/functions'
+import { Pool, PoolConfig } from 'pg'
 
 interface Choice {
   id: number
@@ -19,82 +20,69 @@ interface DataStore {
   hangzhou: HangzhouRecord[]
 }
 
-const GITHUB_REPO = 'ZhangChenfei123/lgt'
-const DATA_FILE_PATH = 'data/choices.json'
+const PROJECT_ID = 'tlwjwaselavdokiqvuew'
+const PASSWORD = 'Zgl@1812342754'
 
-async function getData(): Promise<DataStore> {
-  try {
-    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`)
-    if (response.ok) {
-      const data = await response.json()
-      const content = Buffer.from(data.content, 'base64').toString('utf-8')
-      const parsed = JSON.parse(content)
-      if (Array.isArray(parsed)) {
-        return { choices: parsed, hangzhou: [] }
+const regions = ['ap-northeast-1', 'ap-southeast-1', 'us-east-1', 'eu-west-1', 'ap-south-1']
+
+let pool: Pool | null = null
+
+async function createPool(): Promise<Pool> {
+  for (const region of regions) {
+    try {
+      const config: PoolConfig = {
+        host: `aws-0-${region}.pooler.supabase.com`,
+        port: 5432,
+        database: 'postgres',
+        user: `postgres.${PROJECT_ID}`,
+        password: PASSWORD,
+        ssl: { rejectUnauthorized: true },
+        connectionTimeoutMillis: 5000,
       }
-      return { choices: parsed.choices || [], hangzhou: parsed.hangzhou || [] }
-    } else if (response.status === 404) {
-      return { choices: [], hangzhou: [] }
+      const testPool = new Pool(config)
+      await testPool.query('SELECT 1')
+      pool = testPool
+      console.log(`Connected to region: ${region}`)
+      return pool
+    } catch {
+      console.log(`Failed to connect to region: ${region}`)
     }
-    return { choices: [], hangzhou: [] }
-  } catch {
-    return { choices: [], hangzhou: [] }
+  }
+  throw new Error('Failed to connect to any region')
+}
+
+async function getPool(): Promise<Pool> {
+  if (!pool) {
+    pool = await createPool()
+  }
+  return pool
+}
+
+async function initTables() {
+  try {
+    const pool = await getPool()
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS choices (
+        id SERIAL PRIMARY KEY,
+        choice VARCHAR(1) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        ip VARCHAR(50)
+      )
+    `)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS hangzhou (
+        id SERIAL PRIMARY KEY,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        ip VARCHAR(50)
+      )
+    `)
+  } catch (error) {
+    console.error('Failed to init tables:', error)
   }
 }
 
-async function saveData(data: DataStore): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!process.env.GITHUB_TOKEN) {
-      return { success: false, error: 'GITHUB_TOKEN not set' }
-    }
-    
-    const token = process.env.GITHUB_TOKEN
-    for (let i = 0; i < token.length; i++) {
-      if (token.charCodeAt(i) > 127) {
-        return { success: false, error: `GITHUB_TOKEN包含非ASCII字符，位置${i}: "${token[i]}" (charCode: ${token.charCodeAt(i)})` }
-      }
-    }
-    
-    if (token.length < 30) {
-      return { success: false, error: `GITHUB_TOKEN太短（${token.length}字符），请检查是否正确` }
-    }
-
-    const existingResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`)
-    let sha = ''
-    
-    if (existingResponse.ok) {
-      const existingData = await existingResponse.json()
-      sha = existingData.sha
-    } else if (existingResponse.status !== 404) {
-      const errorData = await existingResponse.json()
-      return { success: false, error: `Failed to get existing file: ${errorData.message || existingResponse.status}` }
-    }
-
-    const content = Buffer.from(JSON.stringify(data, null, 2), 'utf8').toString('base64')
-    
-    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE_PATH}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `token ${process.env.GITHUB_TOKEN}`,
-      },
-      body: JSON.stringify({
-        message: 'Update choices data',
-        content,
-        sha,
-      }),
-    })
-    
-    if (response.ok) {
-      return { success: true }
-    } else {
-      const errorData = await response.json()
-      return { success: false, error: errorData.message || `HTTP ${response.status}` }
-    }
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Unknown error' }
-  }
-}
+initTables()
 
 function jsonResponse(data: any, statusCode = 200) {
   return {
@@ -135,32 +123,24 @@ const handler: Handler = async (event) => {
     }
 
     try {
-      const data = await getData()
-      const newChoice: Choice = {
-        id: Date.now(),
-        choice: choice as 'A' | 'B' | 'C' | 'D',
-        created_at: new Date().toISOString(),
-        ip,
-      }
-      data.choices.unshift(newChoice)
-      const saveResult = await saveData(data)
-      if (saveResult.success) {
-        return jsonResponse({ success: true, choice: newChoice })
-      } else {
-        return jsonResponse({ success: false, error: 'Failed to save choice', details: saveResult.error }, 500)
-      }
+      const pool = await getPool()
+      const result = await pool.query('INSERT INTO choices (choice, ip) VALUES ($1, $2)', [choice, ip])
+      return jsonResponse({ success: true, rowCount: result.rowCount })
     } catch (error: any) {
       console.error('Failed to save choice:', error)
+      pool = null
       return jsonResponse({ success: false, error: 'Failed to save choice', details: error.message }, 500)
     }
   }
 
   if (pathMatch('/api/choices') && httpMethod === 'GET') {
     try {
-      const data = await getData()
-      return jsonResponse({ success: true, choices: data.choices })
+      const pool = await getPool()
+      const result = await pool.query('SELECT * FROM choices ORDER BY created_at DESC')
+      return jsonResponse({ success: true, choices: result.rows })
     } catch (error: any) {
       console.error('Failed to get choices:', error)
+      pool = null
       return jsonResponse({ success: false, error: 'Failed to get choices', details: error.message }, 500)
     }
   }
@@ -172,32 +152,24 @@ const handler: Handler = async (event) => {
     }
 
     try {
-      const data = await getData()
-      const newRecord: HangzhouRecord = {
-        id: Date.now(),
-        content: content.trim(),
-        created_at: new Date().toISOString(),
-        ip,
-      }
-      data.hangzhou.unshift(newRecord)
-      const saveResult = await saveData(data)
-      if (saveResult.success) {
-        return jsonResponse({ success: true, record: newRecord })
-      } else {
-        return jsonResponse({ success: false, error: 'Failed to save record', details: saveResult.error }, 500)
-      }
+      const pool = await getPool()
+      const result = await pool.query('INSERT INTO hangzhou (content, ip) VALUES ($1, $2)', [content.trim(), ip])
+      return jsonResponse({ success: true, rowCount: result.rowCount })
     } catch (error: any) {
       console.error('Failed to save hangzhou record:', error)
+      pool = null
       return jsonResponse({ success: false, error: 'Failed to save record', details: error.message }, 500)
     }
   }
 
   if (pathMatch('/api/hangzhou') && httpMethod === 'GET') {
     try {
-      const data = await getData()
-      return jsonResponse({ success: true, records: data.hangzhou })
+      const pool = await getPool()
+      const result = await pool.query('SELECT * FROM hangzhou ORDER BY created_at DESC')
+      return jsonResponse({ success: true, records: result.rows })
     } catch (error: any) {
       console.error('Failed to get hangzhou records:', error)
+      pool = null
       return jsonResponse({ success: false, error: 'Failed to get records', details: error.message }, 500)
     }
   }
