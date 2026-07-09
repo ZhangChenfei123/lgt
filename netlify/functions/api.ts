@@ -1,15 +1,6 @@
-import { Handler, Context } from '@netlify/functions'
-import express from 'express'
-import cors from 'cors'
-import serverless from 'serverless-http'
+import { Handler } from '@netlify/functions'
 import fs from 'fs'
 import path from 'path'
-
-const app = express()
-
-app.use(cors())
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 const dataDir = path.join(__dirname, '../../data')
 const choicesDbPath = path.join(dataDir, 'choices.json')
@@ -62,15 +53,34 @@ function loadData(): void {
 
 loadData()
 
-app.post('/api/choices', (req, res) => {
-  try {
-    const { choice } = req.body
+function jsonResponse(data: any, statusCode = 200) {
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+    body: JSON.stringify(data),
+  }
+}
+
+const handler: Handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return jsonResponse({ success: true }, 200)
+  }
+
+  const { path, httpMethod } = event
+  const body = event.body ? JSON.parse(event.body) : {}
+  const ip = event.headers['x-nf-client-connection-ip'] || 'unknown'
+
+  if (path === '/api/choices' && httpMethod === 'POST') {
+    const { choice } = body
     if (!choice || !['A', 'B', 'C', 'D'].includes(choice)) {
-      return res.status(400).json({ success: false, error: 'Invalid choice' })
+      return jsonResponse({ success: false, error: 'Invalid choice' }, 400)
     }
-    
-    const ip = req.headers['x-nf-client-connection-ip'] || 'unknown'
-    
+
     const newChoice: Choice = {
       id: nextChoiceId++,
       choice: choice as 'A' | 'B' | 'C' | 'D',
@@ -79,30 +89,20 @@ app.post('/api/choices', (req, res) => {
     }
     choices.push(newChoice)
     fs.writeFileSync(choicesDbPath, JSON.stringify(choices, null, 2))
-    
-    res.json({ success: true })
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to save choice' })
-  }
-})
 
-app.get('/api/choices', (req, res) => {
-  try {
-    res.json({ success: true, choices: [...choices].reverse() })
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to get choices' })
+    return jsonResponse({ success: true })
   }
-})
 
-app.post('/api/hangzhou', (req, res) => {
-  try {
-    const { content } = req.body
+  if (path === '/api/choices' && httpMethod === 'GET') {
+    return jsonResponse({ success: true, choices: [...choices].reverse() })
+  }
+
+  if (path === '/api/hangzhou' && httpMethod === 'POST') {
+    const { content } = body
     if (!content || content.trim().length === 0) {
-      return res.status(400).json({ success: false, error: 'Content is required' })
+      return jsonResponse({ success: false, error: 'Content is required' }, 400)
     }
-    
-    const ip = req.headers['x-nf-client-connection-ip'] || 'unknown'
-    
+
     const newRecord: HangzhouRecord = {
       id: nextHangzhouId++,
       content: content.trim(),
@@ -111,28 +111,19 @@ app.post('/api/hangzhou', (req, res) => {
     }
     hangzhouRecords.push(newRecord)
     fs.writeFileSync(hangzhouDbPath, JSON.stringify(hangzhouRecords, null, 2))
-    
-    res.json({ success: true })
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to save record' })
+
+    return jsonResponse({ success: true })
   }
-})
 
-app.get('/api/hangzhou', (req, res) => {
-  try {
-    res.json({ success: true, records: [...hangzhouRecords].reverse() })
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to get records' })
+  if (path === '/api/hangzhou' && httpMethod === 'GET') {
+    return jsonResponse({ success: true, records: [...hangzhouRecords].reverse() })
   }
-})
 
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ success: true, message: 'ok' })
-})
+  if (path === '/api/health' && httpMethod === 'GET') {
+    return jsonResponse({ success: true, message: 'ok' })
+  }
 
-const handler: Handler = (event, context) => {
-  const serverlessHandler = serverless(app)
-  return serverlessHandler(event, context)
+  return jsonResponse({ success: false, error: 'Not found' }, 404)
 }
 
 export { handler }
