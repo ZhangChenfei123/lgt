@@ -1,35 +1,38 @@
-import { Pool } from 'pg';
-const pool = new Pool({
-    host: 'db.tlwjwaselavdokiqvuew.supabase.co',
-    port: 5432,
-    database: 'postgres',
-    user: 'postgres',
-    password: 'Zgl@1812342754',
-});
-async function initTables() {
+const DATA_KEY = 'lgt_choices_data_v2';
+async function getData() {
     try {
-        await pool.query(`
-      CREATE TABLE IF NOT EXISTS choices (
-        id SERIAL PRIMARY KEY,
-        choice VARCHAR(1) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        ip VARCHAR(50)
-      )
-    `);
-        await pool.query(`
-      CREATE TABLE IF NOT EXISTS hangzhou (
-        id SERIAL PRIMARY KEY,
-        content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        ip VARCHAR(50)
-      )
-    `);
+        const response = await fetch(`https://api.jsonstorage.net/v1/json/${DATA_KEY}`, {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+        if (response.ok) {
+            const data = await response.json();
+            return { choices: data.choices || [], hangzhou: data.hangzhou || [] };
+        }
+        else {
+            return { choices: [], hangzhou: [] };
+        }
     }
-    catch (error) {
-        console.error('Failed to init tables:', error);
+    catch {
+        return { choices: [], hangzhou: [] };
     }
 }
-initTables();
+async function saveData(data) {
+    try {
+        const response = await fetch(`https://api.jsonstorage.net/v1/json/${DATA_KEY}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+        return response.ok;
+    }
+    catch {
+        return false;
+    }
+}
 function jsonResponse(data, statusCode = 200) {
     return {
         statusCode,
@@ -62,11 +65,24 @@ const handler = async (event) => {
     if (pathMatch('/api/choices') && httpMethod === 'POST') {
         const { choice } = body;
         if (!choice || !['A', 'B', 'C', 'D'].includes(choice)) {
-            return jsonResponse({ success: false, error: 'Invalid choice', received: { path, choice, body } }, 400);
+            return jsonResponse({ success: false, error: 'Invalid choice' }, 400);
         }
         try {
-            const result = await pool.query('INSERT INTO choices (choice, ip) VALUES ($1, $2)', [choice, ip]);
-            return jsonResponse({ success: true, rowCount: result.rowCount });
+            const data = await getData();
+            const newChoice = {
+                id: Date.now(),
+                choice: choice,
+                created_at: new Date().toISOString(),
+                ip,
+            };
+            data.choices.unshift(newChoice);
+            const success = await saveData(data);
+            if (success) {
+                return jsonResponse({ success: true, choice: newChoice });
+            }
+            else {
+                return jsonResponse({ success: false, error: 'Failed to save choice' }, 500);
+            }
         }
         catch (error) {
             console.error('Failed to save choice:', error);
@@ -75,8 +91,8 @@ const handler = async (event) => {
     }
     if (pathMatch('/api/choices') && httpMethod === 'GET') {
         try {
-            const result = await pool.query('SELECT * FROM choices ORDER BY created_at DESC');
-            return jsonResponse({ success: true, choices: result.rows });
+            const data = await getData();
+            return jsonResponse({ success: true, choices: data.choices });
         }
         catch (error) {
             console.error('Failed to get choices:', error);
@@ -89,8 +105,21 @@ const handler = async (event) => {
             return jsonResponse({ success: false, error: 'Content is required' }, 400);
         }
         try {
-            const result = await pool.query('INSERT INTO hangzhou (content, ip) VALUES ($1, $2)', [content.trim(), ip]);
-            return jsonResponse({ success: true, rowCount: result.rowCount });
+            const data = await getData();
+            const newRecord = {
+                id: Date.now(),
+                content: content.trim(),
+                created_at: new Date().toISOString(),
+                ip,
+            };
+            data.hangzhou.unshift(newRecord);
+            const success = await saveData(data);
+            if (success) {
+                return jsonResponse({ success: true, record: newRecord });
+            }
+            else {
+                return jsonResponse({ success: false, error: 'Failed to save record' }, 500);
+            }
         }
         catch (error) {
             console.error('Failed to save hangzhou record:', error);
@@ -99,8 +128,8 @@ const handler = async (event) => {
     }
     if (pathMatch('/api/hangzhou') && httpMethod === 'GET') {
         try {
-            const result = await pool.query('SELECT * FROM hangzhou ORDER BY created_at DESC');
-            return jsonResponse({ success: true, records: result.rows });
+            const data = await getData();
+            return jsonResponse({ success: true, records: data.hangzhou });
         }
         catch (error) {
             console.error('Failed to get hangzhou records:', error);
@@ -108,8 +137,8 @@ const handler = async (event) => {
         }
     }
     if (pathMatch('/api/health') && httpMethod === 'GET') {
-        return jsonResponse({ success: true, message: 'ok', path, httpMethod });
+        return jsonResponse({ success: true, message: 'ok' });
     }
-    return jsonResponse({ success: false, error: 'Not found', path, httpMethod }, 404);
+    return jsonResponse({ success: false, error: 'Not found' }, 404);
 };
 export { handler };
