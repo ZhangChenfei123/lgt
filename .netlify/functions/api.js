@@ -6,7 +6,11 @@ async function getData() {
         if (response.ok) {
             const data = await response.json();
             const content = Buffer.from(data.content, 'base64').toString('utf-8');
-            return JSON.parse(content);
+            const parsed = JSON.parse(content);
+            if (Array.isArray(parsed)) {
+                return { choices: parsed, hangzhou: [] };
+            }
+            return { choices: parsed.choices || [], hangzhou: parsed.hangzhou || [] };
         }
         else if (response.status === 404) {
             return { choices: [], hangzhou: [] };
